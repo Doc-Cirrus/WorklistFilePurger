@@ -13,7 +13,7 @@ import stat
 import urllib.request
 
 TARGET = os.path.join(os.path.dirname(__file__), 'Orthanc')
-ORTHANC_VERSION = '1.13.0'
+PLUGIN_SDK_VERSION = '1.13.0'
 REPOSITORY = 'https://orthanc.uclouvain.be/hg/orthanc/raw-file'
 
 FILES = [
@@ -64,15 +64,15 @@ def Download(x):
 commands = []
 
 for f in FILES:
-    commands.append([ 'Orthanc-%s' % ORTHANC_VERSION,
+    commands.append([ 'default',
                       f[0],
                       os.path.join(f[1], os.path.basename(f[0])) ])
 
 for f in SDK:
     commands.append([
-        'Orthanc-%s' % ORTHANC_VERSION,
+        'Orthanc-%s' % PLUGIN_SDK_VERSION,
         'OrthancServer/Plugins/Include/%s' % f,
-        'Sdk-%s/%s' % (ORTHANC_VERSION, f)
+        'Sdk-%s/%s' % (PLUGIN_SDK_VERSION, f)
     ])
 
 
