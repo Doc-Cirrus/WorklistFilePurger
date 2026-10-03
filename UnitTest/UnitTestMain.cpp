@@ -21,113 +21,114 @@
 #include <Logging.h>
 
 #include <boost/filesystem.hpp>
-#include <boost/system/error_code.hpp>
-#include <boost/move/make_unique.hpp>
-#include <boost/move/unique_ptr.hpp>
+#include <cstdlib>
+#include <cstring>
 #include <fstream>
+#include <memory>
 #include "../Plugin/Purger.h"
 
-namespace move = boost::movelib;
 namespace fs = boost::filesystem;
 
-void openAndStoreAsString(std::string* result, std::string file) {
-        std::ifstream t(file);
-        std::stringstream buffer;
-        buffer << t.rdbuf();
-        *result = buffer.str();
+// Answer of GET /studies/{id}, as Orthanc returns it: styled JSON, ending with a newline
+static const char* const STUDY_JSON = R"({
+   "ID" : "27f7126f-4f66fb14-03f4081b-f9341db2-53925988",
+   "IsStable" : true,
+   "MainDicomTags" : {
+      "AccessionNumber" : "A1234",
+      "StudyDate" : "20260101",
+      "StudyInstanceUID" : "12.234.1234.234561"
+   },
+   "ParentPatient" : "6816cb19-844d5aee-85245eba-8a5e7f5d-6c8a2d31",
+   "Series" : [ "3fd7ae4a-29b8d4c4-6e5c5d5f-5c2e4cdd-8d4b8e6f" ],
+   "Type" : "Study"
 }
+)";
 
+static std::string restAnswer_;
+static OrthancPluginErrorCode restError_ = OrthancPluginErrorCode_Success;
 
-OrthancPluginErrorCode PluginServiceMock(struct _OrthancPluginContext_t* context,_OrthancPluginService service,
-const void* params)
+// The services of the Orthanc core that the plugin calls: only "RestApiGet"
+// answers something, the other ones (logging, ...) do nothing
+static OrthancPluginErrorCode ServiceMock(struct _OrthancPluginContext_t* context,
+                                          _OrthancPluginService service,
+                                          const void* params)
 {
     if (service == _OrthancPluginService_RestApiGet)
     {
+        if (restError_ != OrthancPluginErrorCode_Success)
+        {
+            return restError_;
+        }
+
         const _OrthancPluginRestApiGet& p = *reinterpret_cast<const _OrthancPluginRestApiGet*>(params);
-        std::string data;
-        openAndStoreAsString(&data, "study.txt");
-
-        size_t size = data.size();
-        p.target->data = malloc(size);
-        memcpy(p.target->data, data.c_str(), size);
+        p.target->size = restAnswer_.size();
+        p.target->data = restAnswer_.empty() ? NULL : malloc(restAnswer_.size());
+        if (!restAnswer_.empty())
+        {
+            memcpy(p.target->data, restAnswer_.data(), restAnswer_.size());
+        }
     }
-    return OrthancPluginErrorCode_Success;
-}
 
-OrthancPluginErrorCode logServiceMock(struct _OrthancPluginContext_t* context,_OrthancPluginService service,
-const void* params)
-{
     return OrthancPluginErrorCode_Success;
 }
 
 class WorklistRemoverTest : public ::testing::Test {
     protected:
-        move::unique_ptr<OrthancPluginContext> context_;
-        OrthancPluginContext pluginContext_;
-        move::unique_ptr<OrthancPlugins::WorklistPurger> purger_;
+        OrthancPluginContext context_;
+        std::unique_ptr<OrthancPlugins::WorklistPurger> purger_;
         std::string folder_;
 
     virtual void SetUp() {
-        context_ = move::make_unique<OrthancPluginContext>();
-        context_->InvokeService = &PluginServiceMock;
-        context_->Free = &free;
-        pluginContext_.InvokeService = &logServiceMock;
-        Orthanc::Logging::InitializePluginContext(&pluginContext_);
+        memset(&context_, 0, sizeof(context_));
+        context_.orthancVersion = "1.13.0";
+        context_.Free = &free;
+        context_.InvokeService = &ServiceMock;
+        Orthanc::Logging::InitializePluginContext(&context_, "worklist-file-purger");
 
-        //create a directory for dummy files
-        fs::path p = fs::current_path() ;
-        p.concat("/worklist_files");
-        boost::system::error_code ec;
+        restAnswer_ = STUDY_JSON;
+        restError_ = OrthancPluginErrorCode_Success;
 
-        if (fs::create_directory(p, ec)) {
-            folder_ = p.generic_string();
-            purger_ = move::make_unique<OrthancPlugins::WorklistPurger>(context_.get(), folder_);
-        } else {
-            std::cerr << "Error Code: "<< ec << "\nCreating worklist_files testfolder was not successful" << "\n";
-            return;
-        };
+        // A fresh folder per test, so that a crashed run leaves nothing behind for the next one
+        fs::path p = fs::temp_directory_path() / fs::unique_path("worklist-purger-%%%%-%%%%-%%%%");
+        fs::create_directories(p);
+        folder_ = p.string();
+        purger_.reset(new OrthancPlugins::WorklistPurger(&context_, folder_));
 
         //create worklist files
         for (int i = 0; i < 10; i++) {
-            std::string string_i = std::to_string(i);
-            std::string filename = folder_ + "/worklist_12.234.1234.23456" + string_i + "_unixtime.wl";
-            const char* full_file_path = filename.c_str();
-            FILE* file_pointer = std::fopen(full_file_path, "w");
+            createFile("worklist_12.234.1234.23456" + std::to_string(i) + "_unixtime.wl");
         }
     }
 
     virtual void TearDown() {
-        // remove worklist files and directory
-        boost::filesystem::remove_all(folder_);
-        boost::filesystem::remove(folder_);
+        fs::remove_all(folder_);
     }
 
+    void createFile(const std::string& name) {
+        std::ofstream file((fs::path(folder_) / name).string());
+        ASSERT_TRUE(file.good());
+    }
+
+    bool exists(const std::string& name) {
+        return fs::exists(fs::path(folder_) / name);
+    }
 };
 
 TEST_F(WorklistRemoverTest, getStudyUID) {
     const char* resourceId = "27f7126f-4f66fb14-03f4081b-f9341db2-53925988";
     std::string result;
     ASSERT_EQ(purger_->getStudyUID(resourceId, &result), OrthancPluginErrorCode_Success);
+    ASSERT_EQ("12\\.234\\.1234\\.234561", result);
 }
 
 TEST_F(WorklistRemoverTest, verifyAndRemoveWorklist) {
-    std::string fileName;
-
     for (int i = 1; i < 10; i+=2) {
-        std::string string_i = std::to_string(i);
-        std::string studyUID = "12.234.1234.23456" + string_i;
+        std::string studyUID = "12.234.1234.23456" + std::to_string(i);
         std::string filename = "worklist_" + studyUID + "_unixtime.wl";
-        std::string full_file_path = folder_ + "/" + filename;
 
-        const char* file = full_file_path.c_str();
-        FILE* file_pointer = std::fopen(file, "r");
-
-        ASSERT_TRUE(file_pointer != NULL);
-        fclose(file_pointer);
+        ASSERT_TRUE(exists(filename));
         purger_->verifyAndRemoveWorklistFile(&studyUID);
-        std::ifstream ifile;
-        ifile.open(file);
-        ASSERT_FALSE(ifile);
+        ASSERT_FALSE(exists(filename));
     }
 }
 
