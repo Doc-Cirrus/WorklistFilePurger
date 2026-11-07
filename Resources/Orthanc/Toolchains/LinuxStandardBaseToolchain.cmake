@@ -1,4 +1,23 @@
-# Taken from https://hg.orthanc-server.com/orthanc-authorization/
+# Orthanc - A Lightweight, RESTful DICOM Store
+# Copyright (C) 2012-2016 Sebastien Jodogne, Medical Physics
+# Department, University Hospital of Liege, Belgium
+# Copyright (C) 2017-2023 Osimis S.A., Belgium
+# Copyright (C) 2024-2026 Orthanc Team SRL, Belgium
+# Copyright (C) 2021-2026 Sebastien Jodogne, ICTEAM UCLouvain, Belgium
+#
+# This program is free software: you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public License
+# as published by the Free Software Foundation, either version 3 of
+# the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+# Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public
+# License along with this program. If not, see
+# <http://www.gnu.org/licenses/>.
 
 
 #
@@ -43,7 +62,7 @@ SET(CMAKE_SYSTEM_PROCESSOR ${LSB_TARGET_PROCESSOR})
 # which compilers to use for C and C++
 SET(CMAKE_C_COMPILER ${LSB_PATH}/bin/lsbcc)
 
-if (${CMAKE_VERSION} VERSION_LESS "3.6.0") 
+if (${CMAKE_VERSION} VERSION_LESS "3.6.0")
   CMAKE_FORCE_CXX_COMPILER(${LSB_PATH}/bin/lsbc++ GNU)
 else()
   SET(CMAKE_CXX_COMPILER ${LSB_PATH}/bin/lsbc++)
@@ -53,7 +72,7 @@ endif()
 SET(CMAKE_FIND_ROOT_PATH ${LSB_PATH})
 
 # adjust the default behaviour of the FIND_XXX() commands:
-# search headers and libraries in the target environment, search 
+# search headers and libraries in the target environment, search
 # programs in the host environment
 SET(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
 SET(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY NEVER)
