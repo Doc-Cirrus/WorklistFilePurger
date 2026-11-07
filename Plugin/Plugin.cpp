@@ -20,6 +20,7 @@
 #include <orthanc/OrthancCPlugin.h>
 #include "../Resources/Orthanc/Plugins/OrthancPluginCppWrapper.h"
 #include <Logging.h>
+#include <OrthancException.h>
 
 #include <iostream>
 #include <boost/filesystem.hpp>
@@ -27,19 +28,27 @@ using namespace boost::filesystem;
 
 #define ORTHANC_PLUGIN_NAME "worklist-file-purger"
 
-static std::string folder_;
 static OrthancPlugins::WorklistPurger* purger_;
 
 OrthancPluginErrorCode OnChange(OrthancPluginChangeType changeType,OrthancPluginResourceType resourceType, const char*
                                                                                                            resourceId) {
-    purger_->OnChangeCallback(changeType, resourceType, resourceId);
+    // No exception may leave this C callback
+    try {
+        purger_->OnChangeCallback(changeType, resourceType, resourceId);
+    } catch (Orthanc::OrthancException& e) {
+        LOG(ERROR) << "WorklistPurger: " << e.What();
+    } catch (std::exception& e) {
+        LOG(ERROR) << "WorklistPurger: " << e.what();
+    } catch (...) {
+        LOG(ERROR) << "WorklistPurger: unknown error";
+    }
     return OrthancPluginErrorCode_Success;
 };
 
 extern "C" {
     ORTHANC_PLUGINS_API int32_t OrthancPluginInitialize(OrthancPluginContext* c) {
         OrthancPluginContext* context_ = c;
-        OrthancPlugins::SetGlobalContext(context_);
+        OrthancPlugins::SetGlobalContext(context_, ORTHANC_PLUGIN_NAME);
         Orthanc::Logging::InitializePluginContext(context_, ORTHANC_PLUGIN_NAME);
 
         /* Check the version of the Orthanc core */
@@ -55,33 +64,38 @@ extern "C" {
         OrthancPluginSetDescription2(c, ORTHANC_PLUGIN_NAME, "Delete worklist file after receiving a matching instance in Orthanc PACS");
 
 
-        OrthancPlugins::OrthancConfiguration configuration;
+        // No exception may leave this C function: a configuration with a wrong type throws
+        try {
+            OrthancPlugins::OrthancConfiguration configuration;
 
-        OrthancPlugins::OrthancConfiguration worklistsConf;
-        OrthancPlugins::OrthancConfiguration worklistPurger;
+            OrthancPlugins::OrthancConfiguration worklistsConf;
+            OrthancPlugins::OrthancConfiguration worklistPurger;
 
-        configuration.GetSection(worklistsConf, "Worklists");
-        configuration.GetSection(worklistPurger, "WorklistPurger");
+            configuration.GetSection(worklistsConf, "Worklists");
+            configuration.GetSection(worklistPurger, "WorklistPurger");
 
-        bool serverEnabled = worklistsConf.GetBooleanValue("Enable", false);
-        bool pluginEnabled = worklistPurger.GetBooleanValue("Enable", false);
+            bool serverEnabled = worklistsConf.GetBooleanValue("Enable", false);
+            bool pluginEnabled = worklistPurger.GetBooleanValue("Enable", false);
 
-        worklistsConf.LookupStringValue(folder_, "Database");
+            std::string folder_;
+            worklistsConf.LookupStringValue(folder_, "Database");
 
-        if (serverEnabled && pluginEnabled) {
-            if (is_directory(path(folder_))) {
-                try {
+            if (serverEnabled && pluginEnabled) {
+                if (is_directory(path(folder_))) {
                     purger_ = new OrthancPlugins::WorklistPurger(context_, folder_);
                     OrthancPluginRegisterOnChangeCallback(context_, OnChange);
-                } catch (std::exception& e) {
-                    LOG(ERROR) << e.what();
-                    return -1;
+                } else {
+                    LOG(WARNING) << "The configuration option \"Worklists.Database\" must contain a path to an existing folder in the Orthanc configuration file";
                 }
             } else {
-                LOG(WARNING) << "The configuration option \"Worklists.Database\" must contain a path to an existing folder in the Orthanc configuration file";
+              LOG(WARNING) << "Worklist server or WorklistPurger plugin is disabled in the Orthanc configuration file";
             }
-        } else {
-          LOG(WARNING) << "Worklist server or WorklistPurger plugin is disabled in the Orthanc configuration file";
+        } catch (Orthanc::OrthancException& e) {
+            LOG(ERROR) << "WorklistPurger: " << e.What();
+            return -1;
+        } catch (std::exception& e) {
+            LOG(ERROR) << "WorklistPurger: " << e.what();
+            return -1;
         }
         return 0;
     }
@@ -90,6 +104,8 @@ extern "C" {
   ORTHANC_PLUGINS_API void OrthancPluginFinalize()
   {
     LOG(WARNING) << "WorklistPurger plugin is finalizing";
+    delete purger_;
+    purger_ = NULL;
   }
 
 

@@ -22,9 +22,7 @@
 #include <Logging.h>
 #include <boost/filesystem.hpp>
 #include <json/value.h>
-#include <json/reader.h>
-#include <iostream>
-#include <regex>
+#include <vector>
 using namespace boost::filesystem;
 
 namespace OrthancPlugins {
@@ -38,82 +36,73 @@ namespace OrthancPlugins {
         OrthancPluginMemoryBuffer answerBody;
         std::string uri = std::string ("/studies/") + std::string (resourceId) ;
 
-        OrthancPluginRestApiGet(context_, &answerBody, uri.c_str());
+        OrthancPluginErrorCode code = OrthancPluginRestApiGet(context_, &answerBody, uri.c_str());
+        if (code != OrthancPluginErrorCode_Success) {
+            LOG(ERROR) << "Cannot read " << uri << " from the REST API (error " << code << ")";
+            return code;
+        }
 
-        // Parse JSON
-        Json::Value studyJSON;
-        char *begin, *end;
-        begin = (char*)answerBody.data;
-        std::string s((const char*)answerBody.data);
-        end = begin + (s.length() - 1);
-
-        Json::CharReaderBuilder builder {};
-
-        auto reader = std::unique_ptr<Json::CharReader>( builder.newCharReader() );
-
-        Json::Value parsed_study {};
-        std::string errors {};
-        const auto is_parsed = reader->parse(begin,end,&parsed_study,&errors );
+        // The answer is not NUL-terminated: parse exactly "size" bytes
+        Json::Value study;
+        bool isParsed = OrthancPlugins::ReadJson(study, answerBody.data, answerBody.size);
         OrthancPluginFreeMemoryBuffer(context_, &answerBody);
 
-        if ( is_parsed != 0 )
-        {
-            LOG(ERROR) << "Parsing API response was not successful";
+        if (!isParsed || !study.isObject()) {
+            LOG(ERROR) << "The answer of " << uri << " is not a JSON object";
             return OrthancPluginErrorCode_BadJson;
         }
 
-        try {
-            std::string studyUID = parsed_study["MainDicomTags"]["StudyInstanceUID"].asString();
-            LOG(INFO) << "Study Instance UID of the stable study: " << studyUID;
-
-            escapeDotsInFilename(&studyUID, result);
-            return OrthancPluginErrorCode_Success;
-        }
-        catch ( const Json::Exception& error )
-        {
-            LOG(ERROR) << "Accessing Study Instance UID failed: " << error.what();
+        const Json::Value& tags = study["MainDicomTags"];
+        if (!tags.isObject() || !tags["StudyInstanceUID"].isString() || tags["StudyInstanceUID"].asString().empty()) {
+            LOG(ERROR) << "The study " << resourceId << " has no StudyInstanceUID";
             return OrthancPluginErrorCode_InexistentTag;
         }
+
+        *result = tags["StudyInstanceUID"].asString();
+        LOG(INFO) << "Study Instance UID of the stable study: " << *result;
+        return OrthancPluginErrorCode_Success;
     };
 
-    void WorklistPurger::escapeDotsInFilename(std::string* studyUID, std::string* escaped_studyUID) {
-        for (auto it = (*studyUID).cbegin() ; it != (*studyUID).cend(); ++it) {
-            if (*it == '.') {
-                *escaped_studyUID += "\\";
-            }
-            *escaped_studyUID += *it;
-        }
-    }
+    void WorklistPurger::verifyAndRemoveWorklistFile(std::string* studyUID) {
+        // A plain prefix, not a regular expression: a UID with special characters can neither
+        // match other files nor throw. The error_code overloads of Boost do not throw either,
+        // as this runs inside a callback of Orthanc.
+        const std::string prefix = "worklist_" + *studyUID + "_";
+        boost::system::error_code ec;
 
-    void WorklistPurger::verifyAndRemoveWorklistFile(std::string* escaped_studyUID) {
-        path source(folder_);
-        directory_iterator end;
-
-        for (directory_iterator it(source); it != end; ++it) {
-            std::string filename = it->path().filename().string();
-            std::string match_string = "(worklist_" + (*escaped_studyUID) + "_)(.*)";
-
-            if (std::regex_match(filename, std::regex(match_string))) {
-                LOG(WARNING) << "Found a matching worklist file file for Study Instance UID " << *escaped_studyUID;
-                if (remove(it->path())) {
-                    LOG(WARNING) << "Worklist file was successfully deleted";
-                } else {
-                    LOG(ERROR) << "Unable to delete worklist file";
-                };
-                return;
+        // Collected first, then removed: removing entries while iterating a folder is unspecified
+        std::vector<path> matches;
+        for (directory_iterator it(path(folder_), ec), end; !ec && it != end; it.increment(ec)) {
+            if (it->path().filename().string().compare(0, prefix.size(), prefix) == 0) {
+                matches.push_back(it->path());
             }
         }
-        LOG(WARNING) << "No worklist file for Study Instance UID " << *escaped_studyUID << " found";
-        return;
+
+        if (ec) {
+            LOG(ERROR) << "Cannot list the worklist folder " << folder_ << ": " << ec.message();
+        }
+
+        if (matches.empty()) {
+            LOG(WARNING) << "No worklist file for Study Instance UID " << *studyUID << " found";
+            return;
+        }
+
+        for (const path& file : matches) {
+            if (remove(file, ec)) {
+                LOG(WARNING) << "Deleted the worklist file " << file.filename().string();
+            } else {
+                LOG(ERROR) << "Unable to delete the worklist file " << file.string() << ": " << ec.message();
+            }
+        }
     };
 
     OrthancPluginErrorCode WorklistPurger:: OnChangeCallback(OrthancPluginChangeType changeType,OrthancPluginResourceType
                                                                            resourceType, const char* resourceId) {
         if (changeType == OrthancPluginChangeType_StableStudy ) {
             std::string studyUID;
-            getStudyUID(resourceId, &studyUID);
-
-            verifyAndRemoveWorklistFile(&studyUID);
+            if (getStudyUID(resourceId, &studyUID) == OrthancPluginErrorCode_Success) {
+                verifyAndRemoveWorklistFile(&studyUID);
+            }
         }
 
         return OrthancPluginErrorCode_Success;
