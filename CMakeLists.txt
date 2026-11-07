@@ -113,6 +113,11 @@ set_target_properties(WorklistPurger PROPERTIES
   VERSION ${ORTHANC_PLUGIN_VERSION} 
   SOVERSION ${ORTHANC_PLUGIN_VERSION})
 
+# Only the base names of the source files go into the logs and the binaries
+if (COMMAND DefineSourceBasenameForTarget)
+  DefineSourceBasenameForTarget(WorklistPurger)
+endif()
+
 install(
   TARGETS WorklistPurger
   RUNTIME DESTINATION lib    # Destination for Windows
@@ -133,6 +138,10 @@ if (BUILD_UNIT_TESTS)
     )
 
   target_link_libraries(UnitTest ${GOOGLE_TEST_LIBRARIES})
+
+  if (COMMAND DefineSourceBasenameForTarget)
+    DefineSourceBasenameForTarget(UnitTest)
+  endif()
 
   enable_testing()
   add_test(NAME UnitTest COMMAND UnitTest)

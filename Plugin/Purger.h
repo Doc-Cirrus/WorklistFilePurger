@@ -27,9 +27,10 @@ namespace OrthancPlugins {
         public:
             WorklistPurger(OrthancPluginContext*  context_, std::string folder_);
             virtual ~WorklistPurger();
+            // Reads the StudyInstanceUID of a study through the REST API of Orthanc
             virtual OrthancPluginErrorCode getStudyUID(const char* resourceId, std::string *result);
+            // Removes every worklist file of a study: "worklist_<StudyInstanceUID>_*"
             virtual void verifyAndRemoveWorklistFile(std::string* studyUID);
-            virtual void escapeDotsInFilename(std::string* studyUID, std::string* escaped_studyUID);
             virtual OrthancPluginErrorCode OnChangeCallback(OrthancPluginChangeType changeType,OrthancPluginResourceType
                                                                                   resourceType, const char* resourceId);
     };
