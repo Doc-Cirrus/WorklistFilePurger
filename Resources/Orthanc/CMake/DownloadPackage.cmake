@@ -1,4 +1,23 @@
-# Taken from https://hg.orthanc-server.com/orthanc-authorization/
+# Orthanc - A Lightweight, RESTful DICOM Store
+# Copyright (C) 2012-2016 Sebastien Jodogne, Medical Physics
+# Department, University Hospital of Liege, Belgium
+# Copyright (C) 2017-2023 Osimis S.A., Belgium
+# Copyright (C) 2024-2026 Orthanc Team SRL, Belgium
+# Copyright (C) 2021-2026 Sebastien Jodogne, ICTEAM UCLouvain, Belgium
+#
+# This program is free software: you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public License
+# as published by the Free Software Foundation, either version 3 of
+# the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+# Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public
+# License along with this program. If not, see
+# <http://www.gnu.org/licenses/>.
 
 
 macro(GetUrlFilename TargetVariable Url)
@@ -73,7 +92,7 @@ macro(DownloadFile MD5 Url)
 
   set(TMP_PATH "${CMAKE_SOURCE_DIR}/ThirdPartyDownloads/${TMP_FILENAME}")
   if (NOT EXISTS "${TMP_PATH}")
-    message("Downloading ${Url}")
+    message("Downloading ${Url} since the file was not found in ${TMP_PATH}")
 
     # This fixes issue 6: "I think cmake shouldn't download the
     # packages which are not in the system, it should stop and let
@@ -83,19 +102,26 @@ macro(DownloadFile MD5 Url)
       message(FATAL_ERROR "CMake is not allowed to download from Internet. Please set the ALLOW_DOWNLOADS option to ON")
     endif()
 
-    if ("${MD5}" STREQUAL "no-check")
-      message(WARNING "Not checking the MD5 of: ${Url}")
-      file(DOWNLOAD "${Url}" "${TMP_PATH}"
-        SHOW_PROGRESS TIMEOUT 300 INACTIVITY_TIMEOUT 60
-        STATUS Failure)
-    else()
-      file(DOWNLOAD "${Url}" "${TMP_PATH}"
-        SHOW_PROGRESS TIMEOUT 300 INACTIVITY_TIMEOUT 60
-        EXPECTED_MD5 "${MD5}" STATUS Failure)
-    endif()
+    foreach (retry RANGE 1 5)   # Retries 5 times
+      if ("${MD5}" STREQUAL "no-check")
+        message(WARNING "Not checking the MD5 of: ${Url}")
+        file(DOWNLOAD "${Url}" "${TMP_PATH}"
+          SHOW_PROGRESS TIMEOUT 30 INACTIVITY_TIMEOUT 10
+          STATUS Failure)
+      else()
+        file(DOWNLOAD "${Url}" "${TMP_PATH}"
+          SHOW_PROGRESS TIMEOUT 30 INACTIVITY_TIMEOUT 10
+          EXPECTED_MD5 "${MD5}" STATUS Failure)
+      endif()
 
-    list(GET Failure 0 Status)
+      list(GET Failure 0 Status)
+      if (Status EQUAL 0)
+        break()  # Successful download
+      endif()
+    endforeach()
+
     if (NOT Status EQUAL 0)
+      file(REMOVE ${TMP_PATH})
       message(FATAL_ERROR "Cannot download file: ${Url}")
     endif()
     
