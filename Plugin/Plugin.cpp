@@ -25,6 +25,8 @@
 #include <boost/filesystem.hpp>
 using namespace boost::filesystem;
 
+#define ORTHANC_PLUGIN_NAME "worklist-file-purger"
+
 static std::string folder_;
 static OrthancPlugins::WorklistPurger* purger_;
 
@@ -38,7 +40,7 @@ extern "C" {
     ORTHANC_PLUGINS_API int32_t OrthancPluginInitialize(OrthancPluginContext* c) {
         OrthancPluginContext* context_ = c;
         OrthancPlugins::SetGlobalContext(context_);
-        Orthanc::Logging::InitializePluginContext(context_);
+        Orthanc::Logging::InitializePluginContext(context_, ORTHANC_PLUGIN_NAME);
 
         /* Check the version of the Orthanc core */
         if (OrthancPluginCheckVersion(context_) == 0) {
@@ -50,7 +52,7 @@ extern "C" {
         }
 
         LOG(WARNING) << "WorklistFilePurger :  plugin is initializing";
-        OrthancPluginSetDescription(c, "Delete worklist file after receiving a matching instance in Orthanc PACS");
+        OrthancPluginSetDescription2(c, ORTHANC_PLUGIN_NAME, "Delete worklist file after receiving a matching instance in Orthanc PACS");
 
 
         OrthancPlugins::OrthancConfiguration configuration;
@@ -93,7 +95,7 @@ extern "C" {
 
   ORTHANC_PLUGINS_API const char* OrthancPluginGetName()
   {
-    return "worklist-file-purger";
+    return ORTHANC_PLUGIN_NAME;
   }
 	
 
